@@ -20,8 +20,9 @@ class Downloader:
         - new_session (bool): True if a session was not passed, and the downloader created a new one
         - progress_bar (bool): Whether to output a progress bar or not
         - aiohttp_args (dict): Arguments to be passed in each aiohttp request. If you supply a Range header using this, it will be overwritten in fetch()
+        - size (int): The size of the file to be downloaded
     """
-    def __init__(self, url, file, threads=4, session=None, progress_bar=True, aiohttp_args={"method": "GET"}, create_dir=True):
+    def __init__(self, url, file, threads=4, session=None, progress_bar=True, aiohttp_args={"method": "GET"}, create_dir=True, size=None):
         """Assigns arguments to self for when asyncstart() or start() calls download.
         
         All arguments are assigned directly to self except for: 
@@ -39,6 +40,7 @@ class Downloader:
             - progress_bar (bool): Whether to output a progress bar or not
             - aiohttp_args (dict): Arguments to be passed in each aiohttp request. If you supply a Range header using this, it will be overwritten in fetch()
             - create_dir (bool): If true, the directories encompassing the file will be created if they do not exist already.
+            - size (int): The size of the file to be downloaded
         """
         self.url = url
         if create_dir:
@@ -56,6 +58,7 @@ class Downloader:
         if "method" not in aiohttp_args:
             aiohttp_args["method"] = "GET"
         self.aiohttp_args = aiohttp_args
+        self.size = size
     
     def start(self):
         """Calls asyncstart() synchronously"""
@@ -90,20 +93,23 @@ class Downloader:
 
     async def download(self):
         """Generates ranges and calls fetch() with them."""
-        temp_args = self.aiohttp_args.copy()
-        temp_args["method"] = "HEAD"
-        async with self.session.request(url=self.url, **temp_args) as head:
-            length = int(head.headers["Content-Length"])
-            start = -1
-            base = int(length / self.threads)
-            ranges = list()
-            for counter in range(self.threads - 1):
-                ranges.append((start + 1, start + base))
-                start += base    
-            ranges.append((start + 1, length))
-            if self.progress_bar:
-                from tqdm import tqdm
-                with tqdm(total=length, unit_scale=True, unit="B") as progress:
-                    await asyncio.gather(*[self.fetch(progress, filerange) for filerange in ranges])
-            else:
-                await asyncio.gather(*[self.fetch(False, filerange) for filerange in ranges])
+        if self.size is None:
+            temp_args = self.aiohttp_args.copy()
+            temp_args["method"] = "HEAD"
+            async with self.session.request(url=self.url, **temp_args) as head:
+                length = int(head.headers["Content-Length"])
+        else:
+            length = self.size
+        start = -1
+        base = int(length / self.threads)
+        ranges = list()
+        for counter in range(self.threads - 1):
+            ranges.append((start + 1, start + base))
+            start += base
+        ranges.append((start + 1, length))
+        if self.progress_bar:
+            from tqdm import tqdm
+            with tqdm(total=length, unit_scale=True, unit="B") as progress:
+                await asyncio.gather(*[self.fetch(progress, filerange) for filerange in ranges])
+        else:
+            await asyncio.gather(*[self.fetch(False, filerange) for filerange in ranges])
